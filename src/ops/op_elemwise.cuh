@@ -27,10 +27,13 @@ template <typename T>
 class SGDFunc
 {
 public:
+    // Constructor
+    explicit SGDFunc(float learningR) : lr(learningR) {}
     __host__ __device__ T operator()(T t, T dt)
     {
         //Lab-1: add your code here (delete return 0)
-        return 0;
+        // return 0;
+        return t - lr*dt;
     }
     const float lr;
 };
@@ -43,7 +46,8 @@ public:
     __host__ __device__ T operator()(T a, T b)
     {
         //Lab-1: add your code here (delete return 0)
-        return 0;
+        // return 0;
+        return a + b;
     }
 };
 
@@ -52,10 +56,12 @@ template <typename T>
 class AddConstFunc
 {
 public:
+    explicit AddConstFunc(T v): b(v) {}
     __host__ __device__ T operator()(T a)
     {
         //Lab-1: add your code here (delete return 0)
-        return 0;
+        // return 0;
+        return a + b;
     }
     const T b;
 };
@@ -68,7 +74,8 @@ public:
     __host__ __device__ T operator()(T x, T a)
     {
         //Lab-1: add your code here (delete return 0)
-        return 0;
+        // return 0;
+        return x*a;
 
     }
 };
@@ -78,10 +85,12 @@ template <typename T>
 class MultiplyConstFunc
 {
 public:
+    explicit MultiplyConstFunc(T v): b(v) {}
     __host__ __device__ T operator()(T x)
     {
         //Lab-1: add your code here (delete return 0)
-        return 0;
+        // return 0;
+        return x*b;
 
     }
     const T b;
@@ -157,6 +166,14 @@ template <typename OpFunc, typename T>
 __global__ void op_elemwise_unary_kernel(OpFunc f, Tensor<T> t, Tensor<T> out)
 {
   //Lab-1: add your code here
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if(row < t.h && col < t.w){
+    T value = Index(t, row, col);
+    T fvalue = f(value);
+    Index(out, row, col) = fvalue;
+  }
 }
 
 //This function launches the GPU kernel to perform element wise operation 
@@ -167,7 +184,11 @@ void op_elemwise_unary_gpu(OpFunc f, const Tensor<T> &t, Tensor<T> &out)
   //Lab-1:add your code here. Somewhere in this function, 
   //you need to call op_elemwise_unary_kernel<<<???, ???>>>(f, t, out);
   //delete assert(0) when you are done
-  assert(0);
+  //assert(0);
+
+  dim3 blockSize(ELEMWISE_BLOCK_DIM, ELEMWISE_BLOCK_DIM);
+  dim3 numBlocks((t.w + ELEMWISE_BLOCK_DIM -1)/ELEMWISE_BLOCK_DIM, (t.h + ELEMWISE_BLOCK_DIM -1)/ELEMWISE_BLOCK_DIM);
+  op_elemwise_unary_kernel<<<numBlocks, blockSize>>>(f, t, out);
 }
 
 //This is the GPU kernel function for performing element wise operation with 
@@ -186,6 +207,24 @@ template <typename OpFunc, typename AT, typename BT, typename OutT>
 __global__ void op_elemwise_binary_w_bcast_kernel(OpFunc f, Tensor<AT> in1, Tensor<BT> in2, Tensor<OutT> out)
 {
   //Lab-1: add your code here
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if(row < in1.h && col < in1.w){
+    AT valA = Index(in1, row, col);
+    BT valB;
+    if(in2.h == 1 && in1.w == in2.w){
+        valB = Index(in2, 0, col);
+    }
+    else if(in2.w == 1 && in1.h == in1.h){
+        valB = Index(in2, row, 0);
+    }
+    else if(in1.w == in2.w && in1.h == in2.h){
+        valB = Index(in2, row, col);
+    }
+    Index(out, row, col) = f(valA, valB);
+  }
+
 }
 
 //This function launches the GPU kernel that performs elementwise operation 
@@ -197,7 +236,10 @@ void op_elemwise_binary_w_bcast_gpu(OpFunc f, const Tensor<AT> &in1, const Tenso
     //Lab-1: add your code here. Somewhere in this function
    //you need to call op_elemwise_binary_w_bcast_kernel<<<???, ???>>>(f, in1, in2, out);
    //delete assert(0) when you are done
-    assert(0);
+    // assert(0);
+    dim3 blockSize(ELEMWISE_BLOCK_DIM, ELEMWISE_BLOCK_DIM);
+    dim3 numBlocks((in1.w + ELEMWISE_BLOCK_DIM -1)/ELEMWISE_BLOCK_DIM, (in1.h + ELEMWISE_BLOCK_DIM -1)/ELEMWISE_BLOCK_DIM);
+    op_elemwise_binary_w_bcast_kernel<<<numBlocks, blockSize>>>(f, in1, in2, out);
 
 }
 
