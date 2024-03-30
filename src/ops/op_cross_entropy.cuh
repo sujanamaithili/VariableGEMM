@@ -24,20 +24,22 @@ __global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tens
         T m = -1;
         op_multiply(max_logits, m, max_logits);
         // from logits = logits - max_logits
-        op_add(logits, max_logits, logits);
+        Tensor<T> slogits{logits.h, logits.w, on_gpu};
+        op_add(logits, max_logits, slogits);
         // from logits = exp^(logits - max_logits)
-        op_exp(logits, logits);
+        Tensor<T> elogits{logits.h, logits.w, on_gpu};
+        op_exp(slogits, elogits);
         // sum(exp^(logits - max_logits))
         Tensor<T> sum{logits.h, 1, on_gpu};
-        op_sum(logits, sum);
-        // logits/sum(exp^(logits - max_logits))
+        op_sum(elogits, sum);
+        // exp^logits/sum(exp^(logits - max_logits))
         Tensor<T> softmax{logits.h, logits.w, on_gpu};
-        op_divide(logits, sum, softmax);
+        op_divide(elogits, sum, softmax);
 
         // -log(p_i)
         Tensor<T> negative_log_softmax{logits.h, logits.w, on_gpu};
         op_log(softmax, negative_log_softmax);
-        op_multiply(negative_log_softmax, -1.0, negative_log_softmax);
+        op_multiply(negative_log_softmax, m, negative_log_softmax);
 
         // cross entropy loss
         Tensor<T> loss{logits.h, 1, on_gpu};
@@ -45,7 +47,8 @@ __global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tens
 
         // Average cross entropy loss
         op_sum(loss, average_loss);
-        op_divide(average_loss, b, average_loss);
+        T d = b;
+        op_divide(average_loss, d, average_loss);
 
         for(int col = 0; col < c; col++){
             if(Index(targets, row, 0) == col){
