@@ -200,6 +200,7 @@ test_reduction(int m, int n, bool on_gpu)
     op_sum(X, YY);
     Tensor<int> YYref{m, 1};
     op_const_init(YYref, n);
+    assert(op_allclose(YY, YYref));
     op_sum(YY, Y1);
     Y1_host = Y1.toHost();
     assert(Index(Y1_host, 0, 0) == m*n);
@@ -217,6 +218,8 @@ test_reduction(int m, int n, bool on_gpu)
     Tensor<int> indref{m, 1};
     op_const_init(indref, n-1);
     assert(op_allclose(ind, indref));
+
+    std::cout << "op_argmax passed..." << std::endl;
 }
 
 void 

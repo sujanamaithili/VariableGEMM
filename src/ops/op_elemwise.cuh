@@ -96,6 +96,37 @@ public:
     const T b;
 };
 
+//This functor divides two input elements x and b together
+template <typename T>
+class DivideFunc
+{
+public:
+    __host__ __device__ T operator()(T x, T a)
+    {
+        //Lab-1: add your code here (delete return 0)
+        // return 0;
+        return x/a;
+
+    }
+};
+
+//This functor divides constant "b" to the input element
+template <typename T>
+class DivideConstFunc
+{
+public:
+    explicit DivideConstFunc(T v): b(v) {}
+    __host__ __device__ T operator()(T x)
+    {
+        //Lab-1: add your code here (delete return 0)
+        // return 0;
+        return x/b;
+
+    }
+    const T b;
+};
+
+
 //This functor returns 1 if inputs "a" and "b" are equal
 //and returns 0 otherwise. 
 template <typename AT, typename BT, typename OutT>
@@ -105,7 +136,9 @@ public:
     __host__ __device__ OutT operator()(AT a, BT b)
     {
         //Lab-2: add your code here (delete return 0)
-        return 0;
+        // return 0;
+        if(a == b) return 1;
+        else return 0;
     }
 
 };
@@ -119,7 +152,9 @@ public:
     __host__ __device__ T operator()(T x)
     {
         //Lab-2: add your code here (delete return 0)
-        return 0;
+        // return 0;
+        if(x >= 0) return x;
+        else return 0;
     }
 };
 
@@ -132,7 +167,31 @@ public:
     __host__ __device__ T operator()(T x, T dy)
     {
         //Lab-2: add your code here (delete return 0)
-        return 0;
+        // return 0;
+        if(x >= 0) return dy;
+        else return 0;
+    }
+};
+
+//This functor implements the exponential operation
+template <typename T>
+class ExpFunc
+{
+public:
+    __host__ __device__ T operator()(T x)
+    {
+        return exp(x)
+    }
+};
+
+//This functor implements the logarithmic operation
+template <typename T>
+class LogFunc
+{
+public:
+    __host__ __device__ T operator()(T x)
+    {
+        return log(x)
     }
 };
 
@@ -259,6 +318,35 @@ void op_relu(const Tensor<T> &t, Tensor<T> &out)
     }
 }
 
+//This operator implements Exponential and stores the result in "out".
+//y = exp(x)
+template <typename T>
+void op_exp(const Tensor<T> &t, Tensor<T> &out)
+{
+    assert(out.h == t.h && out.w == t.w);
+    ExpFunc<T> f;
+    if (t.on_device && out.on_device) {
+        op_elemwise_unary_gpu(f, t, out);
+    } else {
+        assert(0);
+    }
+}
+
+//This operator implements Logarithm and stores the result in "out".
+//y = log(x)
+template <typename T>
+void op_log(const Tensor<T> &t, Tensor<T> &out)
+{
+    assert(out.h == t.h && out.w == t.w);
+    LogFunc<T> f;
+    if (t.on_device && out.on_device) {
+        op_elemwise_unary_gpu(f, t, out);
+    } else {
+        assert(0);
+    }
+}
+
+
 //This operator is the "backward" function of ReLu. Let out = ReLu(in).
 //Let "d_out" represents the gradient of "out". Calculate the gradient 
 //of "in" using the chain rule and store the result in "d_in".
@@ -344,6 +432,35 @@ void op_multiply(const Tensor<T> &a, T b, Tensor<T> &out)
 {
     assert(out.h == a.h && out.w == a.w);
     MultiplyConstFunc<T> f{b};
+    if (a.on_device && out.on_device) {
+        op_elemwise_unary_gpu(f, a, out);
+    } else {
+        assert(0);
+    }
+}
+
+//This operator performs element-wise division of "a" and "b" and 
+//stores the result in tensor "out"
+template <typename T>
+void op_divide(const Tensor<T> &a, const Tensor<T> &b, Tensor<T> &out)
+{
+    assert(out.h == a.h && out.w == a.w);
+    assert((a.h == b.h && a.w == b.w) || (a.h == b.h && b.w == 1) || (a.w == b.w && b.h == 1));
+    DivideFunc<T> f;
+    if (a.on_device && b.on_device && out.on_device) {
+        op_elemwise_binary_w_bcast_gpu(f, a, b, out);
+    } else {
+        assert(0);
+    }
+}
+
+//This operator performs element-wise division of "a" and constant b
+//stores the result in tensor "out"
+template <typename T>
+void op_divide(const Tensor<T> &a, T b, Tensor<T> &out)
+{
+    assert(out.h == a.h && out.w == a.w);
+    DivideConstFunc<T> f{b};
     if (a.on_device && out.on_device) {
         op_elemwise_unary_gpu(f, a, out);
     } else {

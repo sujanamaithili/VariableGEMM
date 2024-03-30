@@ -61,15 +61,43 @@ public:
     //Except for the last layer, it should invoke Relu activation after each layer.
     void forward(const Tensor<T> &in, Tensor<T> &out)
     {
-      //Lab-2: add your code here
-
+        //Lab-2: add your code here
+        Tensor<T> temp = in;
+        for(int i=0; i < layers.size(); i++){
+            if(i < layers.size()-1){
+                layers[i].forward(temp, activ[i]);
+                op_relu(activ[i], activ[i]);
+                temp = activ[i];
+            }
+            else{
+                //For the last layer
+                layers[i].forward(temp, out);
+            }
+        }
     }
 
     //This function perofmrs the backward operation of a MLP model.
-    //Tensor "in" is the gradients for the outputs of the last linear layer (aka d_logits from op_cross_entropy_loss)
+    //Tensor "d_out" is the gradients for the outputs of the last linear layer (aka d_logits from op_cross_entropy_loss)
     //Invoke the backward function of each linear layer and Relu from the last one to the first one.
     void backward(const Tensor<T> &in, const Tensor<T> &d_out, Tensor<T> &d_in)
     {
        //Lab-2: add your code here
+        Tensor<T> temp = d_out;
+        for(int i = layers.size()-1; i >= 0; i--){
+            if(i == layers.size()-1){
+                layers[i].backward(activ[i-1], temp, d_activ[i-1]);
+                temp = d_activ[i-1];
+                continue;
+            }
+            if(i > 0){
+                op_relu_back(activ[i], temp, d_activ[i]);
+                layers[i].backward(activ[i-1], d_activ[i], d_activ[i-1]);
+                temp = d_activ[i-1];
+            }  
+            else{
+                op_relu_back(activ[i], temp, d_activ[i]);
+                layers[i].backward(in, d_activ[i], d_in);
+            }
+        }
     }
 };

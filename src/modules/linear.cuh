@@ -41,7 +41,14 @@ class LinearLayer {
     //This function calculates the output of a lienar layer 
     //and stores the result in tensor "y"
     void forward(const Tensor<float> &x, Tensor<float> &y) {
-      //Lab-2: please add your code here
+        //Lab-2: please add your code here
+        assert(x.h == y.h && y.w = out_dim)
+        // Calculating y = xw + b
+        // x is batch * in_dim
+        // w is in_dim * out_dim
+        op_mm(x, w.t, y);
+        op_add(y, b.t, y);
+      
     }
 
     //This function performs the backward operation of a linear layer
@@ -51,6 +58,18 @@ class LinearLayer {
     //It also computes the graidents of "x" and saves it in dx.
     void backward(const Tensor<float> &x, const Tensor<float> &dy, Tensor<float> &dx) {
       //Lab-2: Please add your code here
+      // dL/dw = X^T * dL/dy
+      // size of dL/dw is in_dim * out_dim
+      // size of dL/dy is batch * out_dim
+      op_mm(x.transpose(), dy, w.dt);
+
+      // dL/db = dL/dy
+      // size of dL/db is 1*out_dim
+      op_sum(dy, b.dt);
+      
+      // dL/dx = dL/dy * W^T
+      // size of dL/dx is batch * in_dim
+      op_mm(dy, w.t.transpose() , dx);
     }
 
 };
