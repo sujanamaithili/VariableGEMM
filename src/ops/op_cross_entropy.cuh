@@ -21,7 +21,8 @@ __global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tens
 
         // Calculating SOFTMAX
         // from max_logits = -max_logits
-        op_multiply(max_logits, -1.0, max_logits);
+        T m = -1;
+        op_multiply(max_logits, m, max_logits);
         // from logits = logits - max_logits
         op_add(logits, max_logits, logits);
         // from logits = exp^(logits - max_logits)

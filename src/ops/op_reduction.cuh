@@ -140,7 +140,7 @@ void op_argmax(const Tensor<T> &in, Tensor<int> &out_index)
 
 
 template <typename T>
-void op_argmax2(const Tensor<T> &in, Tensor<int> &out)
+void op_argmax2(const Tensor<T> &in, Tensor<T> &out)
 {
     Tensor<T> out_index;
     MaxAccumFunc<T> f;
