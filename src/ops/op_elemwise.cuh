@@ -180,7 +180,7 @@ class ExpFunc
 public:
     __host__ __device__ T operator()(T x)
     {
-        return exp(x)
+        return exp(x);
     }
 };
 
@@ -191,7 +191,7 @@ class LogFunc
 public:
     __host__ __device__ T operator()(T x)
     {
-        return log(x)
+        return log(x);
     }
 };
 

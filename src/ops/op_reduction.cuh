@@ -142,9 +142,9 @@ void op_argmax(const Tensor<T> &in, Tensor<int> &out_index)
 template <typename T>
 void op_argmax2(const Tensor<T> &in, Tensor<int> &out)
 {
-    Tensor<T> out;
+    Tensor<T> out_index;
     MaxAccumFunc<T> f;
-    if (in.on_device && out_index.on_device) {
+    if (in.on_device && out.on_device) {
         op_reduction_gpu(f, in, out, out_index, false);
     } else
         assert(0);

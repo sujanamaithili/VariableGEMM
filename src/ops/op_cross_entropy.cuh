@@ -14,6 +14,7 @@ __global__ T op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<
         // Number of class, in our case 10
         const int c = logits.w;
         const int b = logits.h;
+        bool on_gpu = true;
         // Finding indices of maximum logit per batch
         Tensor<T> max_logits{logits.h, 1, on_gpu};
         op_argmax2(logits, max_logits);
@@ -24,7 +25,7 @@ __global__ T op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<
         // from logits = logits - max_logits
         op_add(logits, max_logits, logits);
         // from logits = exp^(logits - max_logits)
-        op_exp(logits, logits)
+        op_exp(logits, logits);
         // sum(exp^(logits - max_logits))
         Tensor<T> sum{logits.h, 1, on_gpu};
         op_sum(logits, sum);
@@ -39,7 +40,7 @@ __global__ T op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<
 
         // cross entropy loss
         Tensor<T> loss{logits.h, 1, on_gpu};
-        Index(loss, row, 0) = Index(negative_log_softmax, row, Index(target, row, 0));
+        Index(loss, row, 0) = Index(negative_log_softmax, row, Index(targets, row, 0));
 
         // Average cross entropy loss
         Tensor<T> average_loss{1, 1, on_gpu};
