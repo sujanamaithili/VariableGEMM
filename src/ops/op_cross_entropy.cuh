@@ -7,7 +7,7 @@
 #define ELEMWISE_BLOCK_DIM 32
 
 template <typename T>
-__global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<char> &targets, Tensor<T> &d_logits, Tensor<T> &softmax, Tensor<T> &negative_log_softmax, Tensor<T> &loss, Tensor<T> &average_loss)
+__global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<char> &targets, Tensor<T> &d_logits, Tensor<T> &softmax, Tensor<T> &negative_log_softmax, Tensor<T> &loss)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     if(row < logits.h){
@@ -15,11 +15,6 @@ __global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tens
         const int b = logits.h;
         // cross entropy loss
         Index(loss, row, 0) = Index(negative_log_softmax, row, Index(targets, row, 0));
-
-        // Average cross entropy loss
-        op_sum(loss, average_loss);
-        T d = b;
-        op_divide(average_loss, d, average_loss);
 
         for(int col = 0; col < c; col++){
             if(Index(targets, row, 0) == col){
@@ -29,8 +24,6 @@ __global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tens
                 Index(d_logits, row, col) = Index(softmax, row, col);
             }
         }
-
-        // return Index(average_loss, 0, 0);
 
     }
 }
@@ -86,10 +79,16 @@ T op_cross_entropy_loss(const Tensor<T> &logits, const Tensor<char> &targets,
 
     Tensor<T> loss{logits.h, 1, on_gpu};
 
-    Tensor<T> average_loss{1, 1, on_gpu};
-    assert(average_loss.on_device);
+    assert(loss.on_device);
     dim3 blockSize(1,ELEMWISE_BLOCK_DIM);
     dim3 numBlocks(1,(logits.h + ELEMWISE_BLOCK_DIM -1)/ELEMWISE_BLOCK_DIM);
-    op_cross_entropy_loss_kernel<<<blockSize, numBlocks>>>(logits, targets, d_logits, softmax, negative_log_softmax, loss, average_loss);
+    op_cross_entropy_loss_kernel<<<blockSize, numBlocks>>>(logits, targets, d_logits, softmax, negative_log_softmax, loss);
+
+    // Average cross entropy loss
+    Tensor<T> average_loss{1, 1, on_gpu};
+    op_sum(loss, average_loss);
+    T d = b;
+    op_divide(average_loss, d, average_loss);
+
     return Index(average_loss, 0, 0);
 }
