@@ -7,10 +7,12 @@
 #define ELEMWISE_BLOCK_DIM 32
 
 template <typename T>
-__global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<char> &targets, Tensor<T> &d_logits, Tensor<T> loss, Tensor<T> &average_loss)
+__global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<char> &targets, Tensor<T> &d_logits, Tensor<T> &softmax, Tensor<T> &negative_log_softmax, Tensor<T> &loss, Tensor<T> &average_loss)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     if(row < logits.h){
+        const int c = logits.w;
+        const int b = logits.h;
         // cross entropy loss
         Index(loss, row, 0) = Index(negative_log_softmax, row, Index(targets, row, 0));
 
@@ -88,6 +90,6 @@ T op_cross_entropy_loss(const Tensor<T> &logits, const Tensor<char> &targets,
     assert(average_loss.on_device);
     dim3 blockSize(1,ELEMWISE_BLOCK_DIM);
     dim3 numBlocks(1,(logits.h + ELEMWISE_BLOCK_DIM -1)/ELEMWISE_BLOCK_DIM);
-    op_cross_entropy_loss_kernel<<<blockSize, numBlocks>>>(logits, targets, d_logits, loss, average_loss);
+    op_cross_entropy_loss_kernel<<<blockSize, numBlocks>>>(logits, targets, d_logits, softmax, negative_log_softmax, loss, average_loss);
     return Index(average_loss, 0, 0);
 }
