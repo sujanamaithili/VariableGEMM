@@ -87,16 +87,17 @@ public:
             if(i == layers.size()-1){
                 layers[i].backward(activ[i-1], temp, d_activ[i-1]);
                 temp = d_activ[i-1];
-                continue;
             }
-            if(i > 0){
-                op_relu_back(activ[i], temp, d_activ[i]);
-                layers[i].backward(activ[i-1], d_activ[i], d_activ[i-1]);
-                temp = d_activ[i-1];
-            }  
             else{
-                op_relu_back(activ[i], temp, d_activ[i]);
-                layers[i].backward(in, d_activ[i], d_in);
+                if(i > 0){
+                    op_relu_back(activ[i], temp, d_activ[i]);
+                    layers[i].backward(activ[i-1], d_activ[i], d_activ[i-1]);
+                    temp = d_activ[i-1];
+                }  
+                else{
+                    op_relu_back(activ[i], temp, d_activ[i]);
+                    layers[i].backward(in, d_activ[i], d_in);
+                }
             }
         }
     }

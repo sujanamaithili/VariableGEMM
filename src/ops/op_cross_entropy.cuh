@@ -7,21 +7,19 @@
 #define ELEMWISE_BLOCK_DIM 32
 
 template <typename T>
-__global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<char> &targets, Tensor<T> &d_logits, Tensor<T> &softmax, Tensor<T> &negative_log_softmax, Tensor<T> &loss)
+__global__ void op_cross_entropy_loss_kernel(const Tensor<T> logits, const Tensor<char> targets, Tensor<T> d_logits, Tensor<T> softmax,  Tensor<T> negative_log_softmax, Tensor<T> loss)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     if(row < logits.h){
-        const int c = logits.w;
-        const int b = logits.h;
         // cross entropy loss
         Index(loss, row, 0) = Index(negative_log_softmax, row, Index(targets, row, 0));
 
-        for(int col = 0; col < c; col++){
+        for(int col = 0; col < logits.w; col++){
             if(Index(targets, row, 0) == col){
-                Index(d_logits, row, col) = Index(softmax, row, col) - 1;
+                Index(d_logits, row, col) = (Index(softmax, row, col) - 1)/logits.h;
             }
             else{
-                Index(d_logits, row, col) = Index(softmax, row, col);
+                Index(d_logits, row, col) = (Index(softmax, row, col))/logits.h;
             }
         }
 
@@ -83,12 +81,17 @@ T op_cross_entropy_loss(const Tensor<T> &logits, const Tensor<char> &targets,
     dim3 blockSize(1,ELEMWISE_BLOCK_DIM);
     dim3 numBlocks(1,(logits.h + ELEMWISE_BLOCK_DIM -1)/ELEMWISE_BLOCK_DIM);
     op_cross_entropy_loss_kernel<<<blockSize, numBlocks>>>(logits, targets, d_logits, softmax, negative_log_softmax, loss);
+    cudaDeviceSynchronize();
+    // cudaError_t err = cudaGetLastError();
+    // printf("CUDA error: %s\n", cudaGetErrorString(err));
+   
 
     // Average cross entropy loss
     Tensor<T> average_loss{1, 1, on_gpu};
     op_sum(loss, average_loss);
     T d = b;
     op_divide(average_loss, d, average_loss);
-
-    return Index(average_loss, 0, 0);
+    Tensor<T> average_loss_host = average_loss.toHost();
+    T val = Index(average_loss_host, 0, 0);
+    return val;
 }
