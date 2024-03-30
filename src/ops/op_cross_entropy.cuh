@@ -7,42 +7,11 @@
 #define ELEMWISE_BLOCK_DIM 32
 
 template <typename T>
-__global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<char> &targets, Tensor<T> &d_logits, Tensor<T> &average_loss)
+__global__ void op_cross_entropy_loss_kernel(const Tensor<T> &logits, const Tensor<char> &targets, Tensor<T> &d_logits, Tensor<T> loss, Tensor<T> &average_loss)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     if(row < logits.h){
-        // Number of class, in our case 10
-        const int c = logits.w;
-        const int b = logits.h;
-        bool on_gpu = true;
-        // Finding indices of maximum logit per batch
-        Tensor<T> max_logits{logits.h, 1, on_gpu};
-        op_argmax2(logits, max_logits);
-
-        // Calculating SOFTMAX
-        // from max_logits = -max_logits
-        T m = -1;
-        op_multiply(max_logits, m, max_logits);
-        // from logits = logits - max_logits
-        Tensor<T> slogits{logits.h, logits.w, on_gpu};
-        op_add(logits, max_logits, slogits);
-        // from logits = exp^(logits - max_logits)
-        Tensor<T> elogits{logits.h, logits.w, on_gpu};
-        op_exp(slogits, elogits);
-        // sum(exp^(logits - max_logits))
-        Tensor<T> sum{logits.h, 1, on_gpu};
-        op_sum(elogits, sum);
-        // exp^logits/sum(exp^(logits - max_logits))
-        Tensor<T> softmax{logits.h, logits.w, on_gpu};
-        op_divide(elogits, sum, softmax);
-
-        // -log(p_i)
-        Tensor<T> negative_log_softmax{logits.h, logits.w, on_gpu};
-        op_log(softmax, negative_log_softmax);
-        op_multiply(negative_log_softmax, m, negative_log_softmax);
-
         // cross entropy loss
-        Tensor<T> loss{logits.h, 1, on_gpu};
         Index(loss, row, 0) = Index(negative_log_softmax, row, Index(targets, row, 0));
 
         // Average cross entropy loss
@@ -83,11 +52,42 @@ T op_cross_entropy_loss(const Tensor<T> &logits, const Tensor<char> &targets,
     //In order to calculate d_logits, you should derive what its values should be 
     //symbolically.
     // return 0;
+    // Number of class, in our case 10
+    const int c = logits.w;
+    const int b = logits.h;
     bool on_gpu = true;
+    // Finding indices of maximum logit per batch
+    Tensor<T> max_logits{logits.h, 1, on_gpu};
+    op_argmax2(logits, max_logits);
+
+    // Calculating SOFTMAX
+    // from max_logits = -max_logits
+    T m = -1;
+    op_multiply(max_logits, m, max_logits);
+    // from logits = logits - max_logits
+    Tensor<T> slogits{logits.h, logits.w, on_gpu};
+    op_add(logits, max_logits, slogits);
+    // from logits = exp^(logits - max_logits)
+    Tensor<T> elogits{logits.h, logits.w, on_gpu};
+    op_exp(slogits, elogits);
+    // sum(exp^(logits - max_logits))
+    Tensor<T> sum{logits.h, 1, on_gpu};
+    op_sum(elogits, sum);
+    // exp^logits/sum(exp^(logits - max_logits))
+    Tensor<T> softmax{logits.h, logits.w, on_gpu};
+    op_divide(elogits, sum, softmax);
+
+    // -log(p_i)
+    Tensor<T> negative_log_softmax{logits.h, logits.w, on_gpu};
+    op_log(softmax, negative_log_softmax);
+    op_multiply(negative_log_softmax, m, negative_log_softmax);
+
+    Tensor<T> loss{logits.h, 1, on_gpu};
+
     Tensor<T> average_loss{1, 1, on_gpu};
     assert(average_loss.on_device);
     dim3 blockSize(1,ELEMWISE_BLOCK_DIM);
     dim3 numBlocks(1,(logits.h + ELEMWISE_BLOCK_DIM -1)/ELEMWISE_BLOCK_DIM);
-    op_cross_entropy_loss_kernel<<<blockSize, numBlocks>>>(logits, targets, d_logits, average_loss);
+    op_cross_entropy_loss_kernel<<<blockSize, numBlocks>>>(logits, targets, d_logits, loss, average_loss);
     return Index(average_loss, 0, 0);
 }
