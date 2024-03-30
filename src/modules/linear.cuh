@@ -42,7 +42,7 @@ class LinearLayer {
     //and stores the result in tensor "y"
     void forward(const Tensor<float> &x, Tensor<float> &y) {
         //Lab-2: please add your code here
-        assert(x.h == y.h && y.w = out_dim);
+        assert(x.h == y.h && y.w == out_dim);
         // Calculating y = xw + b
         // x is batch * in_dim
         // w is in_dim * out_dim
