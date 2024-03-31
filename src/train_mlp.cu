@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
     int hidden_dim = 16;
     int n_layers = 2;
     int batch_size = 32;
-    int num_epochs = 2;
+    int num_epochs = 10;
 
     for (;;)
     {
