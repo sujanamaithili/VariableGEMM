@@ -46,7 +46,10 @@ class LinearLayer {
         // Calculating y = xw + b
         // x is batch * in_dim
         // w is in_dim * out_dim
-        op_mm(x, w.t, y);
+        Tensor<T> m1{x.h, w.t.w, true};
+        op_mm(x, w.t, m1);
+        y = m1;
+        
         op_add(y, b.t, y);
       
     }
@@ -61,15 +64,21 @@ class LinearLayer {
       // dL/dw = X^T * dL/dy
       // size of dL/dw is in_dim * out_dim
       // size of dL/dy is batch * out_dim
-      op_mm(x.transpose(), dy, w.dt);
-
+      Tensor<T> m{x.w, dy.w, true};
+      op_mm(x.transpose(), dy, m);
+      w.dt = m;
+    
       // dL/db = dL/dy
       // size of dL/db is 1*out_dim
-      op_sum(dy, b.dt);
-      
+      Tensor<T> s{1, dy.w, true};
+      op_sum(dy, s);
+      b.dt = s;
+    
       // dL/dx = dL/dy * W^T
       // size of dL/dx is batch * in_dim
-      op_mm(dy, w.t.transpose() , dx);
+      Tensor<T> m2{x.h, x.w, true};
+      op_mm(dy, w.t.transpose() , m2);
+      dx = m2;
     }
 
 };

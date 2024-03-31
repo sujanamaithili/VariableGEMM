@@ -7,6 +7,7 @@ private:
     std::vector<LinearLayer<T>> layers;
     std::vector<int> layer_dims;
     std::vector<Tensor<T>> activ;
+    std::vector<Tensor<T>> activf;
     std::vector<Tensor<T>> d_activ;
 
     int batch_size;
@@ -30,9 +31,11 @@ public:
         // make all the activation tensors
         activ.reserve(layer_dims.size() - 1);
         d_activ.reserve(layer_dims.size() - 1);
+        activf.reserve(layer_dims.size() -1);
         for (int i = 0; i < layer_dims.size() - 1; i++)
         {
             activ.emplace_back(Tensor<T>(batch_size, layer_dims[i], gpu));
+            activf.emplace_back(Tensor<T>(batch_size, layer_dims[i], gpu));
             // technically, i do not need to save d_activ for backprop, but since iterative
             // training does repeated backprops, reserving space for these tensor once is a good idea
             d_activ.emplace_back(Tensor<T>(batch_size, layer_dims[i], gpu));
@@ -65,8 +68,8 @@ public:
         Tensor<T> temp = in;
         for(int i=0; i < layers.size(); i++){
             if(i < layers.size()-1){
-                layers[i].forward(temp, activ[i]);
-                op_relu(activ[i], activ[i]);
+                layers[i].forward(temp, activf[i]);
+                op_relu(activf[i], activ[i]);
                 temp = activ[i];
             }
             else{
@@ -90,12 +93,12 @@ public:
             }
             else{
                 if(i > 0){
-                    op_relu_back(activ[i], temp, d_activ[i]);
+                    op_relu_back(activf[i], temp, d_activ[i]);
                     layers[i].backward(activ[i-1], d_activ[i], d_activ[i-1]);
                     temp = d_activ[i-1];
                 }  
                 else{
-                    op_relu_back(activ[i], temp, d_activ[i]);
+                    op_relu_back(activf[i], temp, d_activ[i]);
                     layers[i].backward(in, d_activ[i], d_in);
                 }
             }
