@@ -104,7 +104,7 @@ void train_and_test(int epochs, int batch_size, int hidden_dim, int n_layers)
 int main(int argc, char *argv[])
 {
     int hidden_dim = 16;
-    int n_layers = 2;
+    int n_layers = 10;
     int batch_size = 32;
     int num_epochs = 10;
 
