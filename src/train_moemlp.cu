@@ -87,8 +87,8 @@ void test(int batch_size, int hidden_dim, int n_layers)
             break;
         }
         num_batches++;
-        Tensor<float> b_images = images.slice(b * batch_size, (b + 1) * batch_size, 0, images.w);
-        Tensor<char> b_targets = targets.slice(b * batch_size, (b + 1) * batch_size, 0, targets.w);
+        Tensor<float> b_images = test_images.slice(b * batch_size, (b + 1) * batch_size, 0, images.w);
+        Tensor<char> b_targets = test_targets.slice(b * batch_size, (b + 1) * batch_size, 0, targets.w);
 
         moeMLP.forward(b_images, logits, on_gpu);
         
