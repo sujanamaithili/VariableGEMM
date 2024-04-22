@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #include "modules/param.cuh"
 #include "ops/op_elemwise.cuh"
 #include "ops/op_reduction.cuh"
@@ -14,7 +15,7 @@ class MOELinearLayer {
         int in_dim;
         int out_dim;
     public:
-    MOELinearLayer(int in_dim_, int out_dim_, vector<int>& batch_splits_, bool gpu): in_dim(in_dim_), out_dim(out_dim_), batch_splits(batch_splits_){
+    MOELinearLayer(int in_dim_, int out_dim_, std::vector<int>& batch_splits_, bool gpu): in_dim(in_dim_), out_dim(out_dim_), batch_splits(batch_splits_){
         for(int i=0; i < batch_splits.size(); i++){
             experts.emplace_back(in_dim, out_dim, gpu);
         }
