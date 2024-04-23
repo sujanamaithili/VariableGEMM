@@ -75,7 +75,6 @@ void test(int batch_size, int hidden_dim, int n_layers)
 
     Tensor<float> logits{batch_size, 10, on_gpu};
     int num_batches = 0, total_correct = 0;
-    float total_loss = 0.0;
 
     using namespace std::chrono;
     auto start = high_resolution_clock::now();

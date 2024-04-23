@@ -12,11 +12,13 @@ private:
     std::vector<Tensor<T>> activf;
     int batch_size;
     int in_dim;
+    std::vector<int> moe_batch_splits;
 
 public:
-    MOEMLP(int batch_size_, int in_dim_, std::vector<int> layer_dims_, std::vector<int>& moe_batch_splits, bool gpu)
-        : batch_size(batch_size_), in_dim(in_dim_), layer_dims(layer_dims_), moeLayer(in_dim, layer_dims[0], moe_batch_splits, gpu)
+    MOEMLP(int batch_size_, int in_dim_, std::vector<int> layer_dims_, std::vector<int> moe_batch_splits_, bool gpu)
+        : batch_size(batch_size_), in_dim(in_dim_), layer_dims(layer_dims_), moe_batch_splits(moe_batch_splits_), moeLayer()
     {
+        moeLayer = MOELinearLayer<T>(in_dim, layer_dims[0], moe_batch_splits, gpu);
         for (int i = 0; i < layer_dims.size(); i++)
         {
             if (i == 0)
