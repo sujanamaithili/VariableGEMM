@@ -11,8 +11,8 @@
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 
-#include "cublas_utils.h"
 #include "utils/assert.cuh"
+#include "utils/cublas_utils.h"
 #include "utils/tensor.cuh"
 
 using data_type = double;
@@ -29,18 +29,80 @@ __global__ void op_mm_kernel(const Tensor<T> A, const Tensor<T> B,
   Index(C, row, col) = temp;
 }
 
-// This operator compute C = A@B
+// // This operator compute C = A@B
+// template <typename T>
+// void op_mm(const Tensor<T> &A, const Tensor<T> &B, Tensor<T> &C) {
+//   assert(A.h == C.h && B.w == C.w && A.w == B.h);
+//   assert(A.on_device && B.on_device && C.on_device);
+
+//   // Lab-1: please complete this
+//   // You need to define separate kernel function(s) and launch them here
+//   // delete assert(0) when you are finished
+//   int blockSize = C.h;
+//   int numBlocks = C.w;
+//   op_mm_kernel<<<blockSize, numBlocks>>>(A, B, C);
+// }
+
 template <typename T>
 void op_mm(const Tensor<T> &A, const Tensor<T> &B, Tensor<T> &C) {
-  assert(A.h == C.h && B.w == C.w && A.w == B.h);
-  assert(A.on_device && B.on_device && C.on_device);
+  assert(A.w == B.h);
+  assert(A.h == C.h && B.w == C.w);
+  int m = A.h, k = A.w, n = B.w;
+  int lda = A.h, ldb = B.h, ldc = C.h;
+  cublasOperation_t transa = CUBLAS_OP_N;
+  cublasOperation_t transb = CUBLAS_OP_N;
+  const T alpha = 1.0;
+  const T beta = 0.0;
 
-  // Lab-1: please complete this
-  // You need to define separate kernel function(s) and launch them here
-  // delete assert(0) when you are finished
-  int blockSize = C.h;
-  int numBlocks = C.w;
-  op_mm_kernel<<<blockSize, numBlocks>>>(A, B, C);
+  /** debug statements
+  printf("A\n");
+  print_matrix(m, k, A.rawp, lda);
+  printf("=====\n");
+  printf("B\n");
+  print_matrix(k, n, B.rawp, ldb);
+  printf("=====\n");
+  */
+  cublasHandle_t cublasH = NULL;
+  cudaStream_t stream = NULL;
+
+  T *d_A = nullptr;
+  T *d_B = nullptr;
+  T *d_C = nullptr;
+
+  CUBLAS_CHECK(cublasCreate(&cublasH));
+  CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+  CUBLAS_CHECK(cublasSetStream(cublasH, stream));
+
+  CUDA_CHECK(
+      cudaMalloc(reinterpret_cast<void **>(&d_A), sizeof(T) * A.h * A.w));
+  CUDA_CHECK(
+      cudaMalloc(reinterpret_cast<void **>(&d_B), sizeof(T) * B.h * B.w));
+  CUDA_CHECK(
+      cudaMalloc(reinterpret_cast<void **>(&d_C), sizeof(T) * C.h * C.w));
+
+  CUDA_CHECK(cudaMemcpyAsync(d_A, A.rawp, sizeof(T) * A.h * A.w,
+                             cudaMemcpyHostToDevice, stream));
+  CUDA_CHECK(cudaMemcpyAsync(d_B, B.rawp, sizeof(T) * B.h * B.w,
+                             cudaMemcpyHostToDevice, stream));
+
+  CUBLAS_CHECK(cublasDgemm(cublasH, transa, transb, m, n, k, &alpha, d_A, lda,
+                           d_B, ldb, &beta, d_C, ldc));
+  CUDA_CHECK(cudaMemcpyAsync(C.rawp, d_C, sizeof(T) * C.h * C.w,
+                             cudaMemcpyDeviceToHost, stream));
+  CUDA_CHECK(cudaStreamSynchronize(stream));
+  /**
+  printf("C\n");
+  print_matrix(m, n, C.rawp, ldc);
+  printf("=====\n");
+  */
+
+  CUDA_CHECK(cudaFree(d_A));
+  CUDA_CHECK(cudaFree(d_B));
+  CUDA_CHECK(cudaFree(d_C));
+
+  CUBLAS_CHECK(cublasDestroy(cublasH));
+  CUDA_CHECK(cudaStreamDestroy(stream));
+  CUDA_CHECK(cudaDeviceReset());
 }
 
 template <typename T>
