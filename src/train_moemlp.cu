@@ -50,15 +50,13 @@ void test(int batch_size, int hidden_dim, int n_layers)
     MNIST mnist_test{"../data/MNIST/raw", MNIST::Mode::kTest};
     std::cout << "# of test datapoints= " << mnist_test.images.h << " feature size=" << mnist_test.images.w << std::endl;
 
-
     auto test_images = mnist_test.images;
     auto test_targets = mnist_test.targets;
     if (on_gpu) {
         test_images = test_images.toDevice();
         test_targets = test_targets.toDevice();
     }
-    
-    std::vector<int> layer_dims;
+		std::vector<int> layer_dims;
     for (int i = 0; i < n_layers - 1; i++)
     {
         layer_dims.push_back(hidden_dim);
@@ -69,7 +67,6 @@ void test(int batch_size, int hidden_dim, int n_layers)
     std::vector<int> moe_batch_splits;
     generate_random_moe_splits(moe_batch_splits, batch_size, 4);
 
-
     MOEMLP<float> moeMLP{batch_size, MNIST::kImageRows * MNIST::kImageColumns, layer_dims, moe_batch_splits, on_gpu};
     moeMLP.init();
 
@@ -78,7 +75,7 @@ void test(int batch_size, int hidden_dim, int n_layers)
 
     using namespace std::chrono;
     auto start = high_resolution_clock::now();
-
+		
     for (int b = 0; b < test_images.h / batch_size; b++)
     {
         if ((b + 1) * batch_size > test_images.h)
@@ -86,11 +83,11 @@ void test(int batch_size, int hidden_dim, int n_layers)
             break;
         }
         num_batches++;
+				std::cout << "loading batch #" << b << std::endl;
         Tensor<float> b_images = test_images.slice(b * batch_size, (b + 1) * batch_size, 0, test_images.w);
         Tensor<char> b_targets = test_targets.slice(b * batch_size, (b + 1) * batch_size, 0, test_targets.w);
-
-        moeMLP.forward(b_images, logits, on_gpu);
-        
+				std::cout << "starting inference on batch #" << b << std::endl;
+				moeMLP.forward(b_images, logits, on_gpu);
         total_correct += correct(logits, b_targets);
     }
 
