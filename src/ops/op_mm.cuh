@@ -45,6 +45,24 @@ void op_mm_old(const Tensor<T> &A, const Tensor<T> &B, Tensor<T> &C) {
 }
 
 template <typename T>
+__global__ void rowMajor2colMajor(const Tensor<T> A, T *d_A) {
+	assert(A.on_device);
+	int col = threadIdx.x;
+	for (int row = 0; row < A.h; row++) {
+		d_A[row + col * A.h] = Index(A, row, col);
+	} 
+}
+
+template <typename T>
+__global__ void colMajor2rowMajor(T *d_A, Tensor<T> A) {	
+	assert(A.on_device);
+	int row = threadIdx.x;
+	for (int col = 0; col < A.w; col++) {
+		Index(A, row, col) = d_A[row + col * A.h];
+	}	
+}
+
+template <typename T>
 void op_mm(const Tensor<T> &A, const Tensor<T> &B, Tensor<T> &C) {
   assert(A.w == B.h && A.h == C.h && B.w == C.w);
  	assert(A.on_device && B.on_device && C.on_device); 
@@ -52,31 +70,9 @@ void op_mm(const Tensor<T> &A, const Tensor<T> &B, Tensor<T> &C) {
   int lda = A.h, ldb = B.h, ldc = C.h;
   cublasOperation_t transa = CUBLAS_OP_N;
   cublasOperation_t transb = CUBLAS_OP_N;
-  const T alpha = 1.0;
-  const T beta = 0.0;
-
-	T *A_rowMajor = (T *)malloc(sizeof(T) * A.h * A.w);
-	T *B_rowMajor = (T *)malloc(sizeof(T) * B.h * B.w);
-	cudaAssert(cudaMemcpy(A_rowMajor, A.rawp, A.h * A.w * sizeof(T), cudaMemcpyDeviceToHost));
-	cudaAssert(cudaMemcpy(B_rowMajor, B.rawp, B.h * B.w * sizeof(T), cudaMemcpyDeviceToHost));
+  T *alpha = new T; *alpha =  1.0;
+  T *beta = new T; *beta =  0.0;
 	
-	T *A_colMajor = (T *)malloc(sizeof(T) * A.h * A.w);
-	T *B_colMajor = (T *)malloc(sizeof(T) * B.h * B.w);
-	T *C_colMajor = (T *)malloc(sizeof(T) * C.h * C.w);
-	for (int row = 0; row < A.h; row++) {
-		for (int col = 0; col < A.w; col++) {
-			A_colMajor[row + col * A.h] = A_rowMajor[row * A.w + col];
-		}
-	}
-	
-	for (int row = 0; row < B.h; row++) {
-		for (int col = 0; col < B.w; col++) {
-			B_colMajor[row + col * B.h] = B_rowMajor[row * B.w + col];
-		}
-	}
-	delete[] A_rowMajor;
-	delete[] B_rowMajor;
-
 	cublasHandle_t cublasH = NULL;
   cudaStream_t stream = NULL;
 
@@ -89,56 +85,30 @@ void op_mm(const Tensor<T> &A, const Tensor<T> &B, Tensor<T> &C) {
   CUBLAS_CHECK(cublasSetStream(cublasH, stream));
 	
   CUDA_CHECK(
-      cudaMalloc(reinterpret_cast<void **>(&d_A), sizeof(T) * A.h * A.w));
+      cudaMalloc((void **)&d_A, sizeof(T) * A.h * A.w));
   CUDA_CHECK(
-      cudaMalloc(reinterpret_cast<void **>(&d_B), sizeof(T) * B.h * B.w));
+      cudaMalloc((void **)&d_B, sizeof(T) * B.h * B.w));
   CUDA_CHECK(
-      cudaMalloc(reinterpret_cast<void **>(&d_C), sizeof(T) * C.h * C.w));
-	
-  CUDA_CHECK(cudaMemcpy(d_A, A_colMajor, sizeof(T) * A.h * A.w,
-                             cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMemcpy(d_B, B_colMajor, sizeof(T) * B.h * B.w,
-	                             cudaMemcpyHostToDevice));
-	delete[] A_colMajor;
-	delete[] B_colMajor;
-  CUBLAS_CHECK(cublasSgemm(cublasH, transa, transb, m, n, k, &alpha, d_A, lda,
-                           d_B, ldb, &beta, d_C, ldc));
-  CUDA_CHECK(cudaMemcpy(C_colMajor, d_C, sizeof(T) * C.h * C.w, cudaMemcpyDeviceToHost));
+      cudaMalloc((void **)&d_C, sizeof(T) * C.h * C.w));
+
+	rowMajor2colMajor<T><<<1, A.w>>> (A, d_A);
+	rowMajor2colMajor<T><<<1, B.w>>> (B, d_B);
+  
+	CUDA_CHECK(cudaStreamSynchronize(stream));
+	CUDA_CHECK(cudaDeviceSynchronize());
+	CUBLAS_CHECK(cublasSgemm(cublasH, transa, transb, m, n, k, alpha, d_A, lda,
+                           d_B, ldb, beta, d_C, ldc));
   CUDA_CHECK(cudaStreamSynchronize(stream));
-  CUDA_CHECK(cudaFree(d_A));
+
+	colMajor2rowMajor<T><<<1, C.h>>> (d_C, C);  
+	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaFree(d_A));
   CUDA_CHECK(cudaFree(d_B));
   CUDA_CHECK(cudaFree(d_C));
 	
-	//print_matrix(C.h, C.w, C_colMajor, C.h);
-		
   CUBLAS_CHECK(cublasDestroy(cublasH));
   CUDA_CHECK(cudaStreamDestroy(stream));
-	T *C_rowMajor = (T *)malloc(sizeof(T) * C.h * C.w);
-	for (int col = 0; col < C.w; col++) {
-		for (int row = 0; row < C.h; row++) {
-			C_rowMajor[row * C.w + col] = C_colMajor[row + col * C.h];
-		}
-	}
-	//print_matrix(C.h, C.w, C_colMajor, C.h);
-	cudaAssert(cudaMemcpy(C.rawp, C_rowMajor, C.h * C.w * sizeof(T), cudaMemcpyHostToDevice));
-	delete[] C_colMajor;
-	delete[] C_rowMajor;
 	
-	 Tensor<T> C_old{C.h, C.w, true};
-   op_mm_old(A, B, C_old);
-	 Tensor<int> correct_preds{C.h, C.w, true};
-   op_equal(C, C_old, correct_preds);
-	 Tensor<int> sum_correct1{1,C.w, true};
-	 Tensor<int> sum_correct2{1, 1, true};
-   op_sum(correct_preds, sum_correct1);
-	 op_sum(sum_correct1, sum_correct2);
-   auto tmp = sum_correct2.toHost();
-	 // if (Index(tmp, 0, 0) == C.h * C.w) {
-	 //	std::cout << "mm correct" << std::endl;
-	 // } else {
-	// 	std::cout << "mm failed" << std::endl;
-	//  }
-	//  print_matrix(C.h, C.w, C.rowMajor, C.w);		
 	assert(A.on_device && B.on_device && C.on_device);
 }
 
