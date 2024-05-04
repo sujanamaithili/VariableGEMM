@@ -116,9 +116,9 @@ template <typename T>
 int cublas_gemm(int m_array[], int n_array[], int k_array[], T alpha_array[],
                 int lda_array[], int ldb_array[], T beta_array[],
                 int ldc_array[], int group_count, int group_size[],
-                const std::vector<std::vector<T>> &A_array,
-                const std::vector<std::vector<T>> &B_array,
-                std::vector<std::vector<T>> &C_array) {
+                const std::vector<Tensor<T>> A_array,
+                const std::vector<Tensor<T>> B_array,
+                std::vector<Tensor<T>> C_array) {
   cublasHandle_t cublasH = NULL;
   cudaStream_t stream = NULL;
 
@@ -133,24 +133,6 @@ int cublas_gemm(int m_array[], int n_array[], int k_array[], T alpha_array[],
 
   cublasOperation_t transa_array[group_count] = {CUBLAS_OP_N, CUBLAS_OP_N};
   cublasOperation_t transb_array[group_count] = {CUBLAS_OP_N, CUBLAS_OP_N};
-  int problem_idx = 0;
-  for (int i = 0; i < group_count; i++) {
-    printf("Group %d:\n", i);
-    for (int j = 0; j < group_size[i]; j++) {
-      printf("A[%d]\n", j);
-      print_matrix(m_array[i], k_array[i], A_array[problem_idx].data(),
-                   lda_array[i]);
-      printf("=====\n");
-
-      printf("B[%d]\n", j);
-      print_matrix(k_array[i], n_array[i], B_array[problem_idx].data(),
-                   ldb_array[i]);
-      printf("=====\n");
-
-      problem_idx++;
-    }
-    printf("\n");
-  }
   /* step 1: create cublas handle, bind a stream */
   CUBLAS_CHECK(cublasCreate(&cublasH));
 
@@ -160,11 +142,11 @@ int cublas_gemm(int m_array[], int n_array[], int k_array[], T alpha_array[],
   /* step 2: copy data to device */
   for (int i = 0; i < gemm_count; i++) {
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_A[i]),
-                          sizeof(T) * A_array[i].size()));
+                          sizeof(T) * A_array[i].h * A_array[i].w));
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_B[i]),
-                          sizeof(T) * B_array[i].size()));
+                          sizeof(T) * B_array[i].h * B_array[i].w));
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C[i]),
-                          sizeof(T) * C_array[i].size()));
+                          sizeof(T) * C_array[i].h * C_array[i].w));
   }
 
   CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_A_array),
@@ -175,12 +157,8 @@ int cublas_gemm(int m_array[], int n_array[], int k_array[], T alpha_array[],
                         sizeof(T *) * gemm_count));
 
   for (int i = 0; i < gemm_count; i++) {
-    CUDA_CHECK(cudaMemcpyAsync(d_A[i], A_array[i].data(),
-                               sizeof(T) * A_array[i].size(),
-                               cudaMemcpyHostToDevice, stream));
-    CUDA_CHECK(cudaMemcpyAsync(d_B[i], B_array[i].data(),
-                               sizeof(T) * B_array[i].size(),
-                               cudaMemcpyHostToDevice, stream));
+    rowMajor2colMajor<T><<<1, A_array[i].w>>> (A_array[i], d_A[i]);
+    rowMajor2colMajor<T><<<1, B_array[i].w>>> (B_array[i], d_B[i]);
   }
 
   CUDA_CHECK(cudaMemcpyAsync(d_A_array, d_A.data(),
@@ -192,7 +170,8 @@ int cublas_gemm(int m_array[], int n_array[], int k_array[], T alpha_array[],
   CUDA_CHECK(cudaMemcpyAsync(d_C_array, d_C.data(),
                              sizeof(T *) * gemm_count,
                              cudaMemcpyHostToDevice, stream));
-
+  CUDA_CHECK(cudaStreamSynchronize(stream));
+  CUDA_CHECK(cudaDeviceSynchronize());
   /* step 3: compute */
   CUBLAS_CHECK(cublasSgemmGroupedBatched(
       cublasH, transa_array, transb_array, m_array, n_array, k_array,
@@ -201,28 +180,11 @@ int cublas_gemm(int m_array[], int n_array[], int k_array[], T alpha_array[],
 
   /* step 4: copy data to host */
   for (int i = 0; i < gemm_count; i++) {
-    CUDA_CHECK(cudaMemcpyAsync(C_array[i].data(), d_C[i],
-                               sizeof(T) * C_array[i].size(),
-                               cudaMemcpyDeviceToHost, stream));
+    colMajor2rowMajor<T><<<1, C_array[i].h>>> (d_C[i], C_array[i]);
   }
 
   CUDA_CHECK(cudaStreamSynchronize(stream));
-
-  problem_idx = 0;
-  for (int i = 0; i < group_count; i++) {
-    printf("Group %d:\n", i);
-    for (int j = 0; j < group_size[i]; j++) {
-      printf("C[%d]\n", j);
-      print_matrix(m_array[i], n_array[i], C_array[problem_idx].data(),
-                   ldc_array[i]);
-      printf("=====\n");
-
-      problem_idx++;
-    }
-    if (i < group_count - 1) {
-      printf("\n");
-    }
-  }
+  CUDA_CHECK(cudaDeviceSynchronize());
 
   /* free resources */
   CUDA_CHECK(cudaFree(d_A_array));
@@ -244,49 +206,20 @@ int cublas_gemm(int m_array[], int n_array[], int k_array[], T alpha_array[],
 }
 
 template <typename T>
-void rowMajor_to_colMajor(const Tensor<T> &src, std::vector<T> &dest) {
-  printf("allocating memory in dest\n");
-	dest.resize(src.h * src.w);
-	printf("copying data to destination\n");
-	for (int col_idx = 0; col_idx < src.w; col_idx++) {
-		for (int row_idx = 0; row_idx < src.h; row_idx++) {
-			printf("idx = %d \n", col_idx * src.h + row_idx);
-			printf(" val = %f\n", Index(src, row_idx, col_idx));
-			dest[col_idx * src.h + row_idx] = Index(src, row_idx, col_idx);
-		}
-	}
-  // for (int i = 0; i < src.h * src.w; i++) {
-    // std::cout << src.rawp << " ";
-    // dest[i] = src.rawp[i];
-  // }
-  std::cout << std::endl;
-}
-
-template <typename T>
 void batched_gemm(const std::vector<Tensor<T>> &A_batched,
                   const std::vector<Tensor<T>> &B_batched,
                   std::vector<Tensor<T>> &C_batched) {
-  printf("starting batched gemm\n");
-	int gemm_count = A_batched.size();
+  int gemm_count = A_batched.size();
 
   std::map<std::tuple<int, int, int>, std::vector<int>> size_map;
   for (int i = 0; i < gemm_count; i++) {
-		printf("%d --> (%d, %d) x (%d, %d)\n", i, A_batched[i].h, A_batched[i].w, B_batched[i].h, B_batched[i].w);
     size_map[std::make_tuple(A_batched[i].h, A_batched[i].w, B_batched[i].w)]
         .push_back(i);
   }
-	for (auto it : size_map) {
-		printf("group\n");
-		for (auto idx : it.second) {
-			printf("%d %p\t", idx, A_batched[idx].rawp);
-		}
-		printf("\n");
-	}
   int group_count = std::abs(std::distance(size_map.begin(), size_map.end()));
-	printf("divided input into groups\n");
   int lda_array[group_count], ldb_array[group_count], ldc_array[group_count];
   int m_array[group_count], k_array[group_count], n_array[group_count];
-  std::vector<std::vector<T>> A_array(gemm_count), B_array(gemm_count),
+  std::vector<Tensor<T>> A_array(gemm_count), B_array(gemm_count),
       C_array(gemm_count);
   int group_size[group_count];
   T alpha_array[group_count], beta_array[group_count];
@@ -294,39 +227,32 @@ void batched_gemm(const std::vector<Tensor<T>> &A_batched,
   int problem_idx = 0;
   int group_idx = 0;
   for (auto it : size_map) {
-		printf("arranging data for group #%d\n", group_idx);
     for (auto idx : it.second) {
-			printf("converting rowMajor to colMajor of input #%d\n", problem_idx);
-			printf("Tensor A = %s\n", A_batched[idx].str());
-			rowMajor_to_colMajor<T>(A_batched[idx], A_array[problem_idx]);
-      rowMajor_to_colMajor<T>(B_batched[idx], B_array[problem_idx]);
-      rowMajor_to_colMajor<T>(C_batched[idx], C_array[problem_idx]);
+      A_array[problem_idx] = A_batched[idx];
+      B_array[problem_idx] = B_batched[idx];
+      C_array[problem_idx] = C_batched[idx];
       problem_idx++;
     }
     lda_array[group_idx] = std::get<0>(it.first);
     ldb_array[group_idx] = std::get<1>(it.first);
-    ldc_array[group_idx] = std::get<2>(it.first);
+    ldc_array[group_idx] = std::get<0>(it.first);
 
     m_array[group_idx] = std::get<0>(it.first);
-    k_array[group_idx] = ldb_array[group_idx];
-    n_array[group_idx] = ldc_array[group_idx];
+    k_array[group_idx] = std::get<1>(it.first);
+    n_array[group_idx] = std::get<2>(it.first);
 
     group_size[group_idx] = it.second.size();
     alpha_array[group_idx] = 1.0;
     beta_array[group_idx] = 0.0;
     group_idx++;
   }
-	printf("calling cublas gemm\n");
   cublas_gemm<T>(m_array, n_array, k_array, alpha_array, lda_array, ldb_array,
                  beta_array, ldc_array, group_count, group_size, A_array,
                  B_array, C_array);
-	printf("reorganizing output into original order\n");
   problem_idx = 0;
   for (auto it : size_map) {
     for (auto idx : it.second) {
-      for (int i = 0; i < C_array[problem_idx].size(); i++) {
-        C_batched[idx].rawp[i] = C_array[problem_idx][i];
-      }
+      C_batched[idx] = C_array[problem_idx];
       problem_idx++;
     }
   }
