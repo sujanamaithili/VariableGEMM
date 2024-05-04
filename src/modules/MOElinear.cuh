@@ -41,18 +41,18 @@ public:
       std::vector<Tensor<T>> y_batched;
       std::vector<Tensor<T>> w_batched;
       std::vector<Tensor<T>> b_batched;
-      for (int i = 0; i < experts.size(); i++) {
+			for (int i = 0; i < experts.size(); i++) {
         int batch_size = batch_splits[i];
         x_batched.push_back(x.slice(start, start + batch_size, 0, in_dim));
         y_batched.push_back(y.slice(start, start + batch_size, 0, out_dim));
         w_batched.push_back(experts[i].w.t);
-        b_batched.push_back(experst[i].b.t);
+        b_batched.push_back(experts[i].b.t);
         start += batch_size;
       }
       batched_gemm(x_batched, w_batched, y_batched);
-
+			
       for (int i = 0; i < y_batched.size(); i++) {
-        op_add(y_batched[i], b_batched[i], y_batched[i]);
+			  op_add(y_batched[i], b_batched[i], y_batched[i]);
       }
 
     } else {

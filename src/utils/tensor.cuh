@@ -54,7 +54,7 @@ public:
   }
 
   Tensor(int32_t h_, int32_t w_, bool on_device_ = false)
-      : h(h_), w(w_), stride_h(1), stride_w(h_), offset(0),
+      : h(h_), w(w_), stride_h(w_), stride_w(1), offset(0),
         on_device(on_device_) {
     if (on_device_) {
       cudaAssert(cudaMalloc(&rawp, sizeof(T) * h * w));
