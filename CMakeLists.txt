@@ -9,6 +9,7 @@ set(CMAKE_CUDA_FLAGS_DEBUG "-G -g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 link_libraries(-lcurand)
 link_libraries(-lcublas)
+link_libraries(-lcusparse)
 FILE(
   GLOB executables
   ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu
