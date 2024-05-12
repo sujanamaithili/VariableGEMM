@@ -8,35 +8,52 @@
 #include "utils/cublas_utils.h"
 #include "utils/tensor.cuh"
 
-#define CHECK_CUSPARSE(func)																																			\
-		do {																																													\
-			cusparseStatus_t status = (func);																														\
-			if (status != CUSPARSE_STATUS_SUCCESS) {																										\
-				std::printf("cublas error %d at %s:%d\n", 																								\
-								status, __FILE__, __LINE__);																											\
-				throw std::runtime_error("cublas error\n");																								\
-			}																																														\
-		} while (0)																																										
+template <typename T>
+__global__ void vjoin_cpymat_kernel(const Tensor<T> A, T *dest) {
+	int row = blockIdx.x;
+	int col = threadIdx.x;
+
+	dest[row * A.w + col] = Index(A, row, col);
+}
 
 template <typename T>
-__global__ void vjoin_matrices_kernel(const std::vector<Tensor<T>> A_arr, T *dest) {
+__global__ void hjoin_cpymat_kernel(const Tensor<T> A, T *dest, int row_offset, int row_size) {
+	int row = blockIdx.x;
+	int col = threadIdx.x;
+
+	dest[row_size * row + row_offset + col] = Index(A, row, col);
+}
+
+template <typename T>
+__global__ void extract_mat_kernel(Tensor<T> A, T *src) {
+	int row = blockIdx.x;
+	int col = threadIdx.x;
+	// printf("row = %d \t col = %d \n", row, col);
+	return;
+	Index(A, row, col) = src[row * A.w + col];
+}
+
+template <typename T>
+__global__ void vjoin_matrices_kernel(const Tensor<T> *A_arr, T *dest, int dest_numel) {
 	int mat_idx = threadIdx.x;
 	int start_idx = 0;
 	for (int i = 0; i < mat_idx; i++) {
-		start_idx += A_arr[i].h * A_arr[i].w;
+		start_idx = start_idx + A_arr[i].h * A_arr[i].w;
 	}
-	
-	for (int i = 0; i < A_arr[mat_idx].h * A_arr[mat_idx].w; i++) {
-		dest[start_idx + i] = Index(A_arr[mat_idx], i / A_arr[mat_idx].w, i % A_arr[mat_idx].w);
+	for (int i = 0; i < A_arr[mat_idx].h; i++) {
+		for (int j = 0; j < A_arr[mat_idx].w; j++) {
+			dest[start_idx] = Index(A_arr[mat_idx], i, j);
+			start_idx++;
+		}
 	}
 }
 
 template <typename T>
-__global__ void hjoin_matrices_kernel(const std::vector<Tensor<T>> A_arr, T *dest, const int n_tot) {
+__global__ void hjoin_matrices_kernel(const Tensor<T> *A_arr, T *dest, int A_arr_numel, const int n_tot) {
 	int row = threadIdx.x;
 	int idx = n_tot * row;
 
-	for (int i = 0; i < A_arr.size(); i++) {
+	for (int i = 0; i < A_arr_numel; i++) {
 		for (int j = 0; j < A_arr[i].w; j++) {
 			dest[idx] = Index(A_arr[i], row, j);
 			idx++;
@@ -45,11 +62,11 @@ __global__ void hjoin_matrices_kernel(const std::vector<Tensor<T>> A_arr, T *des
 }
 
 template <typename T>
-__global void extract_tensors(const T *dC_values, std::vector<Tensor<T>> C) {
+__global__ void extract_tensors_kernel(const T *dC_values, Tensor<T> *C) {
 	int mat_idx = threadIdx.x;
 	int start_idx = 0;
 	for (int i = 0; i < mat_idx; i++) {
-		start_idx += C[mat_idx].h * C[mat_idx].w;
+		start_idx = start_idx + C[mat_idx].h * C[mat_idx].w;
 	}
 
 	for (int i = 0; i < C[mat_idx].h; i++) {
@@ -78,10 +95,9 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 	}
 	k = A[0].w;
 	
-	int *hC_offsets, *hC_columns, *hC_values;
-	hC_offsets = (int *)malloc((m_tot + 1) * sizeof(int));
-	hC_columns = (int *)malloc(C_nnz * sizeof(int));
-	hC_values = (T *)malloc(C_nnz * sizeof(T));
+	int *hC_offsets = new int[m_tot + 1];
+	int *hC_columns = new int[C_nnz];
+	T *hC_values 		= new T[C_nnz];
 
 	hC_offsets[0] = 0;
 	int idx = 1;
@@ -113,14 +129,36 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 	CUDA_CHECK( cudaMalloc((void **) &dC_columns, C_nnz * sizeof(int)) );
 	CUDA_CHECK( cudaMalloc((void **) &dC_values, C_nnz * sizeof(T)) );
 
+	CUDA_CHECK( cudaDeviceSynchronize() );	
+	std::cout << "gemm_count = " << gemm_count << std::endl;
 	// join A tensors verticaly into dA_dense
-	vjoin_matrices_kernel<<<1, gemm_count>>>(A, dA_dense);
+//	vjoin_matrices_kernel<T><<<1, gemm_count>>>(A.data(), dA_dense, m_tot * k);
+	int start_idx = 0;
+	for (int i = 0; i < gemm_count; i++) {
+		vjoin_cpymat_kernel<T><<<A[i].h, A[i].w>>>(A[i], (T *)(dA_dense + start_idx * sizeof(T)));
+		start_idx += A[i].h * A[i].w;
+	}
+	
+	CUDA_CHECK( cudaDeviceSynchronize() );
+	
 	// join B tensor horizontally into dB_dense
-	hjoin_matrices_kernel<<<1, k>>>(B, dB_dense, n_tot);
+//	hjoin_matrices_kernel<T><<<1, k>>>(B.data(), dB_dense, B.size(), n_tot);
+	int row_offset = 0;
+	for (int i = 0; i < gemm_count; i++) {
+		hjoin_cpymat_kernel<T><<<B[i].h, B[i].w>>>(B[i], dB_dense, row_offset, n_tot);
+		row_offset += B[i].w;
+	}
 	// set dC_offsets and dC_columns	
-	CUDA_CHECK( cudaMemcpy(dC_offsets, hC_offsets, (m_tot + 1) * sizeof(int), cudaMemcpyHostToDevice) );
+
+	std::printf("C_nnz = %d \t m_tot = %d \t n_tot = %d \n", C_nnz, m_tot, n_tot);
+	
+	CUDA_CHECK( cudaDeviceSynchronize() );
+
 	CUDA_CHECK( cudaMemcpy(dC_columns, hC_columns, C_nnz * sizeof(int), cudaMemcpyHostToDevice) );
 	CUDA_CHECK( cudaMemcpy(dC_values, hC_values, C_nnz * sizeof(T), cudaMemcpyHostToDevice) );
+	CUDA_CHECK( cudaMemcpy(dC_offsets, hC_offsets, (m_tot + 1) * sizeof(int), cudaMemcpyHostToDevice) );
+
+	CUDA_CHECK( cudaDeviceSynchronize() );
 
 	// cuSPARSE APIs
 	cusparseHandle_t 			handle = NULL;
@@ -128,12 +166,15 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 	cusparseSpMatDescr_t 	matC;
 	void*									dBuffer = NULL;
 	size_t								bufferSize = 0;
+	T alpha = 1.0f, beta = 0.0f;
 
 	CHECK_CUSPARSE( cusparseCreate(&handle) );
 	CHECK_CUSPARSE( cusparseCreateDnMat(&matA, m_tot, k, lda, dA_dense, CUDA_R_32F, CUSPARSE_ORDER_ROW) );
 	CHECK_CUSPARSE( cusparseCreateDnMat(&matB, k, n_tot, ldb, dB_dense, CUDA_R_32F, CUSPARSE_ORDER_ROW) );
-	CHECK_CUSPARSE( cusparseCreateSpMat(&matC, m_tot, n_tot, C_nnz, dC_offsets, dC_columns, dC_values, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F) );
+	CHECK_CUSPARSE( cusparseCreateCsr(&matC, m_tot, n_tot, C_nnz, dC_offsets, dC_columns, dC_values, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F) );
 	
+	CUDA_CHECK( cudaDeviceSynchronize() );
+
 	CHECK_CUSPARSE( cusparseSDDMM_bufferSize(
 																handle,
 																CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -142,7 +183,8 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 																CUSPARSE_SDDMM_ALG_DEFAULT, &bufferSize) );
 
 	CUDA_CHECK( cudaMalloc(&dBuffer, bufferSize) );
-	
+
+	CUDA_CHECK( cudaDeviceSynchronize() );
 	// execute preprocess
 	CHECK_CUSPARSE( cusparseSDDMM_preprocess(
 																handle,
@@ -151,29 +193,50 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 																&alpha, matA, matB, &beta, matC, CUDA_R_32F,
 																CUSPARSE_SDDMM_ALG_DEFAULT, dBuffer) );
 	
+	CUDA_CHECK( cudaDeviceSynchronize() );
+	
 	// execute SpMM
 	CHECK_CUSPARSE( cusparseSDDMM(handle,
 																CUSPARSE_OPERATION_NON_TRANSPOSE,
 																CUSPARSE_OPERATION_NON_TRANSPOSE,
 																&alpha, matA, matB, &beta, matC, CUDA_R_32F,
 																CUSPARSE_SDDMM_ALG_DEFAULT, dBuffer) );
-	
+
+	CUDA_CHECK( cudaDeviceSynchronize() );
+/*	
 	CHECK_CUSPARSE( cusparseDestroyDnMat(matA) );
 	CHECK_CUSPARSE( cusparseDestroyDnMat(matB) );
 	CHECK_CUSPARSE( cusparseDestroySpMat(matC) );
 	CHECK_CUSPARSE( cusparseDestroy(handle) );
+*/
+ 	CUDA_CHECK( cudaMemcpy(hC_values, dC_values, C_nnz * sizeof(float), cudaMemcpyDeviceToHost) );
+	for (int i = 0; i < C_nnz; i++) {
+		std::cout << hC_values[idx] << ' ';
+	} std::cout << std::endl;
+	offset = 0;
+	std::cout << "C_size = " << C.size() << std::endl;	
+	for (int i = 0; i < gemm_count; i++) {
+		std::cout << C[i].h << ' ' << C[i].w << ' ' << dC_values << ' ' << std::endl;
+		extract_mat_kernel<T><<<C[i].h, C[i].w>>>(C[i], (T *)(dC_values + offset * sizeof(T)));
+		offset += A[i].h * B[i].w;
+		CUDA_CHECK( cudaDeviceSynchronize() );
+		printf("copied C_mat %d\n", i);
+	}
+	CUDA_CHECK( cudaDeviceSynchronize() );	
+//`extract_tensors_kernel<T><<<1, gemm_count>>>(dC_values, C.data());
 
-// 	CHECK_CUDA( cudaMemcpy(hC_values, dC_values, C_nnz * sizeof(float), cudaMemcpyDeviceToHost) );
-	
-	extract_tensors_kernel<<<1, gemm_count>>>(dC_values, C);
+	CHECK_CUSPARSE( cusparseDestroyDnMat(matA) );
+  CHECK_CUSPARSE( cusparseDestroyDnMat(matB) );
+  CHECK_CUSPARSE( cusparseDestroySpMat(matC) );
+  CHECK_CUSPARSE( cusparseDestroy(handle) );
 
 	// free device memory
-	CHECK_CUDA( cudaFree(dBuffer) )
-  CHECK_CUDA( cudaFree(dA_dense) )
-  CHECK_CUDA( cudaFree(dB_dense) )
-  CHECK_CUDA( cudaFree(dC_offsets) )
-  CHECK_CUDA( cudaFree(dC_columns) )
-  CHECK_CUDA( cudaFree(dC_values) )
+	CUDA_CHECK( cudaFree(dBuffer) );
+  CUDA_CHECK( cudaFree(dA_dense) );
+  CUDA_CHECK( cudaFree(dB_dense) );
+  CUDA_CHECK( cudaFree(dC_offsets) );
+  CUDA_CHECK( cudaFree(dC_columns) );
+  CUDA_CHECK( cudaFree(dC_values) );
 	
 	// free host memory
 	delete[] hC_offsets;

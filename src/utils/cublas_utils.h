@@ -60,6 +60,16 @@
         }                                                                                          \
     } while (0)
 
+#define CHECK_CUSPARSE(err)                                                                        \
+    do {                                                                                            \
+        cusparseStatus_t err_ = (err);                                                           \
+        if (err_ != CUSPARSE_STATUS_SUCCESS) {                                                    \
+            std::printf("cusparse error %d at %s:%d\n", err_, __FILE__, __LINE__);                  \
+            throw std::runtime_error("cublas error\n");                                             \
+        }                                                                                           \
+    } while (0)
+
+
 // memory alignment
 #define ALIGN_TO(A, B) (((A + B - 1) / B) * B)
 
