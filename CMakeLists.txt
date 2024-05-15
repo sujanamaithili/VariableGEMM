@@ -23,7 +23,9 @@ FOREACH(exe ${executables})
   target_compile_options(
     ${filename} PRIVATE
     -Wno-unused-function
+		-Wdeprecated-declarations
     --expt-relaxed-constexpr
+		-G
     )
   target_include_directories(
     ${filename} PRIVATE

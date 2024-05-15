@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <cublas_v2.h>
+#include <cuda_runtime.h>
+
+
 #include "utils/cublas_utils.h"
 #include "utils/tensor.cuh"
 
@@ -118,13 +122,15 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 		offset += B[i].w;
 	}
 	memset(hC_values, 0, C_nnz);
+	for (int i = 0; i < C_nnz; i++) hC_values[i] = 1;
 	
 	int *dC_offsets, *dC_columns;
-	T *dA_dense, *dB_dense, *dC_values;
-	int lda = k, ldb = n_tot;
+	T *dA_dense, *dB_dense, *dC_dense, *dC_values;
+	int lda = k, ldb = n_tot, ldc = n_tot;
 		
 	CUDA_CHECK( cudaMalloc((void **) &dA_dense, m_tot * k * sizeof(T)) );
 	CUDA_CHECK( cudaMalloc((void **) &dB_dense, k * n_tot * sizeof(T)) );
+	CUDA_CHECK( cudaMalloc((void **) &dC_dense, m_tot * n_tot * sizeof(T)) );
 	CUDA_CHECK( cudaMalloc((void **) &dC_offsets, (m_tot + 1) * sizeof(int)) );
 	CUDA_CHECK( cudaMalloc((void **) &dC_columns, C_nnz * sizeof(int)) );
 	CUDA_CHECK( cudaMalloc((void **) &dC_values, C_nnz * sizeof(T)) );
@@ -151,7 +157,19 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 	// set dC_offsets and dC_columns	
 
 	std::printf("C_nnz = %d \t m_tot = %d \t n_tot = %d \n", C_nnz, m_tot, n_tot);
-	
+/*
+	cublasOperation_t transa = CUBLAS_OP_N;
+  cublasOperation_t transb = CUBLAS_OP_N;
+	T *d_C = nullptr;
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C), sizeof(T) * m_tot * n_tot));
+	cublasHandle_t cublasH = NULL;
+	CUBLAS_CHECK(cublasCreate(&cublasH));
+	T alpha = 1.0f, beta = 0.0f;
+	CUBLAS_CHECK(
+        cublasSgemm(cublasH, transa, transb, m_tot, n_tot, k, &alpha, dA_dense, m_tot, dB_dense, k, &beta, d_C, m_tot));
+*/
+	T *alpha = new T; *alpha =  1.0;
+	T *beta = new T; *beta =  1.0;
 	CUDA_CHECK( cudaDeviceSynchronize() );
 
 	CUDA_CHECK( cudaMemcpy(dC_columns, hC_columns, C_nnz * sizeof(int), cudaMemcpyHostToDevice) );
@@ -162,24 +180,35 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 
 	// cuSPARSE APIs
 	cusparseHandle_t 			handle = NULL;
-	cusparseDnMatDescr_t 	matA, matB;	
+	cusparseDnMatDescr_t 	matA, matB, matC_dense;	
 	cusparseSpMatDescr_t 	matC;
 	void*									dBuffer = NULL;
 	size_t								bufferSize = 0;
-	T alpha = 1.0f, beta = 0.0f;
+// 	T alpha = 1.0f, beta = 0.0f;
 
 	CHECK_CUSPARSE( cusparseCreate(&handle) );
 	CHECK_CUSPARSE( cusparseCreateDnMat(&matA, m_tot, k, lda, dA_dense, CUDA_R_32F, CUSPARSE_ORDER_ROW) );
 	CHECK_CUSPARSE( cusparseCreateDnMat(&matB, k, n_tot, ldb, dB_dense, CUDA_R_32F, CUSPARSE_ORDER_ROW) );
-	CHECK_CUSPARSE( cusparseCreateCsr(&matC, m_tot, n_tot, C_nnz, dC_offsets, dC_columns, dC_values, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F) );
-	
+	CHECK_CUSPARSE( cusparseCreateDnMat(&matC_dense, m_tot, n_tot, ldc, dC_dense, CUDA_R_32F, CUSPARSE_ORDER_ROW) );
+	CHECK_CUSPARSE( cusparseCreateCsr(&matC, m_tot, n_tot, C_nnz, dC_offsets, dC_columns, dC_values, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F) );	
 	CUDA_CHECK( cudaDeviceSynchronize() );
 
+	CHECK_CUSPARSE( cusparseSparseToDense_bufferSize(
+																				handle, matC, matC_dense,
+                                        CUSPARSE_SPARSETODENSE_ALG_DEFAULT,
+                                        &bufferSize) );
+	CUDA_CHECK( cudaMalloc(&dBuffer, bufferSize) );
+	std::cout << " buffer size = " << bufferSize << std::endl; 
+	CHECK_CUSPARSE( cusparseSparseToDense(handle, matC, matC_dense,
+                                          CUSPARSE_SPARSETODENSE_ALG_DEFAULT,
+                                          dBuffer) );
+	CUDA_CHECK( cudaDeviceSynchronize() );	
+	
 	CHECK_CUSPARSE( cusparseSDDMM_bufferSize(
-																handle,
+															handle,
 																CUSPARSE_OPERATION_NON_TRANSPOSE,
 																CUSPARSE_OPERATION_NON_TRANSPOSE,
-																&alpha, matA, matB, &beta, matC, CUDA_R_32F,
+																alpha, matA, matB, beta, matC, CUDA_R_32F,
 																CUSPARSE_SDDMM_ALG_DEFAULT, &bufferSize) );
 
 	CUDA_CHECK( cudaMalloc(&dBuffer, bufferSize) );
@@ -190,10 +219,10 @@ void op_sdmm (const std::vector<Tensor<T>> &A, const std::vector<Tensor<T>> &B, 
 																handle,
 																CUSPARSE_OPERATION_NON_TRANSPOSE,
 																CUSPARSE_OPERATION_NON_TRANSPOSE,
-																&alpha, matA, matB, &beta, matC, CUDA_R_32F,
+																alpha, matA, matB, beta, matC, CUDA_R_32F,
 																CUSPARSE_SDDMM_ALG_DEFAULT, dBuffer) );
 	
-	CUDA_CHECK( cudaDeviceSynchronize() );
+//	CUDA_CHECK( cudaDeviceSynchronize() );
 	
 	// execute SpMM
 	CHECK_CUSPARSE( cusparseSDDMM(handle,

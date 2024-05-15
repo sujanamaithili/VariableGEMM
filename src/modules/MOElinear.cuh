@@ -37,7 +37,7 @@ public:
     assert(x.h == y.h && y.w == out_dim);
     int start = 0;
     // read flag from args
-    int flag = 2;
+    int flag = 1;
 		if (flag == 0) {
 			for (int i = 0; i < experts.size(); i++) {
         int batch_size = batch_splits[i];
