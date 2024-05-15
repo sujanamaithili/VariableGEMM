@@ -2,8 +2,11 @@
 #include <chrono>
 #include <iostream>
 #include <random>
+#include <vector>
+#include <fstream>
 #include "modules/MOEmlp.cuh"
 #include "modules/linear.cuh"
+#include "utils/tensor.cuh"
 
 #include "utils/dataset_mnist.hh"
 #include "ops/op_elemwise.cuh"
@@ -45,18 +48,43 @@ void generate_random_moe_splits(std::vector<int>& splits, int total_batch_size, 
 }
 
 
-void test(int batch_size, int hidden_dim, int n_layers)
+long long test(int batch_size, int hidden_dim, int n_layers)
 {
     MNIST mnist_test{"../data/MNIST/raw", MNIST::Mode::kTest};
-    std::cout << "# of test datapoints= " << mnist_test.images.h << " feature size=" << mnist_test.images.w << std::endl;
+    // std::cout << "# of test datapoints= " << mnist_test.images.h << " feature size=" << mnist_test.images.w << std::endl;
 
     auto test_images = mnist_test.images;
     auto test_targets = mnist_test.targets;
-    if (on_gpu) {
+    
+
+    int expand = 10;
+    int original_size = test_images.h;
+    int new_size = original_size * expand;
+
+    Tensor<float> expanded_images{new_size, test_images.w, false};
+    Tensor<char> expanded_targets{new_size, test_targets.w, false};
+    
+    for(int i=0; i < expand; i++){
+        for(int j = 0; j < original_size; j++){
+
+            for(int k = 0; k < test_images.w; k++){
+                Index(expanded_images, i*original_size + j, k) = Index(test_images, j, k);
+            }
+
+            Index(expanded_targets, i*original_size + j, 0) = Index(test_targets, j, 0);
+        }
+    }
+
+    std::cout << "# of test datapoints= " << expanded_images.h << " feature size=" << expanded_images.w << std::endl;
+
+    if(on_gpu){
         test_images = test_images.toDevice();
         test_targets = test_targets.toDevice();
+        expanded_images = expanded_images.toDevice();
+        expanded_targets = expanded_targets.toDevice();
     }
-		std::vector<int> layer_dims;
+    
+    std::vector<int> layer_dims;
     for (int i = 0; i < n_layers - 1; i++)
     {
         layer_dims.push_back(hidden_dim);
@@ -76,18 +104,16 @@ void test(int batch_size, int hidden_dim, int n_layers)
     using namespace std::chrono;
     auto start = high_resolution_clock::now();
 		
-    for (int b = 0; b < test_images.h / batch_size; b++)
+    for (int b = 0; b < expanded_images.h / batch_size; b++)
     {
-        if ((b + 1) * batch_size > test_images.h)
+        if ((b + 1) * batch_size > expanded_images.h)
         {
             break;
         }
         num_batches++;
-				std::cout << "loading batch #" << b << std::endl;
-        Tensor<float> b_images = test_images.slice(b * batch_size, (b + 1) * batch_size, 0, test_images.w);
-        Tensor<char> b_targets = test_targets.slice(b * batch_size, (b + 1) * batch_size, 0, test_targets.w);
-				std::cout << "starting inference on batch #" << b << std::endl;
-				moeMLP.forward(b_images, logits, on_gpu);
+        Tensor<float> b_images = expanded_images.slice(b * batch_size, (b + 1) * batch_size, 0, expanded_images.w);
+        Tensor<char> b_targets = expanded_targets.slice(b * batch_size, (b + 1) * batch_size, 0, expanded_targets.w);
+		moeMLP.forward(b_images, logits, on_gpu);
         total_correct += correct(logits, b_targets);
     }
 
@@ -97,8 +123,10 @@ void test(int batch_size, int hidden_dim, int n_layers)
     std::cout << "TEST accuracy=" << total_correct / (float)(num_batches * batch_size)
               << " num_batches=" << num_batches
               << " Inference Time: " << duration.count() << " ms" << std::endl;
-
+    
+    return duration.count();
 }
+
 
 int main(int argc, char *argv[])
 {
@@ -130,5 +158,15 @@ int main(int argc, char *argv[])
         }
         break;
     }
-    test(batch_size, hidden_dim, n_layers);
+    // test(batch_size, hidden_dim, n_layers);
+    std::vector<int> various_hidden_dims = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096};
+    std::ofstream file("inference_times.csv");
+    file << "Hidden Layer Size,Time (ms)\n";
+
+    for(int size: various_hidden_dims){
+        long long time = test(batch_size, size, n_layers);
+        file << size << "," << time << "\n";
+    }
+    file.close();
+    return 0;
 }
