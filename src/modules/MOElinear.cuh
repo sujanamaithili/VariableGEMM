@@ -3,8 +3,8 @@
 #include "modules/param.cuh"
 #include "ops/op_elemwise.cuh"
 #include "ops/op_mm.cuh"
-#include "ops/op_sdmm.cuh"
 #include "ops/op_reduction.cuh"
+#include "ops/op_sdmm.cuh"
 
 #include <algorithm>
 #include <vector>
@@ -38,21 +38,20 @@ public:
     int start = 0;
     // read flag from args
     int flag = 1;
-		if (flag == 0) {
-			for (int i = 0; i < experts.size(); i++) {
+    if (flag == 0) {
+      for (int i = 0; i < experts.size(); i++) {
         int batch_size = batch_splits[i];
         Tensor<T> x_sub = x.slice(start, start + batch_size, 0, in_dim);
         Tensor<T> y_sub = y.slice(start, start + batch_size, 0, out_dim);
         experts[i].forward(x_sub, y_sub);
         start += batch_size;
       }
-		}
-    else if (flag == 1 || flag == 2) {
+    } else if (flag == 1 || flag == 2) {
       std::vector<Tensor<T>> x_batched;
       std::vector<Tensor<T>> y_batched;
       std::vector<Tensor<T>> w_batched;
       std::vector<Tensor<T>> b_batched;
-			for (int i = 0; i < experts.size(); i++) {
+      for (int i = 0; i < experts.size(); i++) {
         int batch_size = batch_splits[i];
         x_batched.push_back(x.slice(start, start + batch_size, 0, in_dim));
         y_batched.push_back(y.slice(start, start + batch_size, 0, out_dim));
@@ -60,14 +59,14 @@ public:
         b_batched.push_back(experts[i].b.t);
         start += batch_size;
       }
-			if (flag == 1) {
-      	batched_gemm<T> (x_batched, w_batched, y_batched);
-			} else if (flag == 2) {
-				op_sdmm<T> (x_batched, w_batched, y_batched);	
-			}
+      if (flag == 1) {
+        batched_gemm<T>(x_batched, w_batched, y_batched);
+      } else if (flag == 2) {
+        op_sdmm<T>(x_batched, w_batched, y_batched);
+      }
 
       for (int i = 0; i < y_batched.size(); i++) {
-			  op_add(y_batched[i], b_batched[i], y_batched[i]);
+        op_add(y_batched[i], b_batched[i], y_batched[i]);
       }
     }
   }
