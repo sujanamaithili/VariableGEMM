@@ -42,4 +42,47 @@ class BatchedMatMul(torch.autograd.Function):
         if ctx.needs_input_grad[1]:
             grad_B = torch.matmul(A.transpose(1, 2), grad_output)
 
+om_mm_cuda = load(name='om_mm_cuda', sources=['om_mm.cu'], verbose=True)
+
+class BatchedGEMMFunction(Function):
+    @staticmethod
+    def forward(ctx, A_batched, B_batched):
+        A_batched_cuda = [tensor.contiguous().float().cuda() for tensor in A_batched]
+        B_batched_cuda = [tensor.contiguous().float().cuda() for tensor in B_batched]
+        C_batched_cuda = [torch.zeros_like(A).cuda() for A in A_batched_cuda]
+
+        om_mm_cuda.batched_gemm(A_batched_cuda, B_batched_cuda, C_batched_cuda)
+
+        ctx.save_for_backward(*A_batched_cuda, *B_batched_cuda)
+
+        C_batched = [tensor.cpu() for tensor in C_batched_cuda]
+
+        return C_batched
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        *A_batched_cuda, *B_batched_cuda = ctx.saved_tensors
+
+        grad_A_batched_cuda = [torch.zeros_like(A).cuda() for A in A_batched_cuda]
+        grad_B_batched_cuda = [torch.zeros_like(B).cuda() for B in B_batched_cuda]
+
+        grad_output_cuda = [tensor.contiguous().float().cuda() for tensor in grad_output]
+
+        om_mm_cuda.batched_gemm(grad_output_cuda, B_batched_cuda, grad_A_batched_cuda)
+        om_mm_cuda.batched_gemm(A_batched_cuda, grad_output_cuda, grad_B_batched_cuda)
+
+        grad_A_batched = [tensor.cpu() for tensor in grad_A_batched_cuda]
+        grad_B_batched = [tensor.cpu() for tensor in grad_B_batched_cuda]
+
+        return tuple(grad_A_batched), tuple(grad_B_batched)
+        
+
+class BatchedGEMMModule(torch.nn.Module):
+    def __init__(self):
+        super(BatchedGEMMModule, self).__init__()
+
+    def forward(self, A_batched, B_batched):
+        return BatchedGEMMFunction.apply(A_batched, B_batched)
+
+
         return grad_A, grad_B
